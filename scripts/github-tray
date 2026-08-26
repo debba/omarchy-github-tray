@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""GitHub API backend for the Omarchy GitHub Tray widget."""
+from __future__ import annotations
+import argparse, json, os, subprocess, sys, urllib.error, urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+UA = "Omarchy-GitHub-Tray"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home()/".local/state"))/"omarchy-github-tray/state.json"
+
+def output(value, code=0):
+    print(json.dumps(value, ensure_ascii=False, separators=(",", ":"))); raise SystemExit(code)
+
+def request(url, token, method="GET", data=None):
+    body = json.dumps(data).encode() if data is not None else None
+    headers={"Authorization":f"Bearer {token}","Accept":"application/vnd.github.v3+json","User-Agent":UA}
+    if body: headers["Content-Type"]="application/json"
+    req=urllib.request.Request(url, body, headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as response:
+            raw=response.read(); return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        detail=e.read().decode(errors="replace")
+        try: detail=json.loads(detail).get("message", detail)
+        except Exception: pass
+        raise RuntimeError(f"GitHub HTTP {e.code}: {detail}")
+    except urllib.error.URLError as e: raise RuntimeError(f"Network error: {e.reason}")
+
+def endpoints(enterprise):
+    base=enterprise.rstrip("/")
+    return ((base+"/api/v3",base+"/api/graphql",base) if base else
+            ("https://api.github.com","https://api.github.com/graphql","https://github.com"))
+
+def graphql(url, token, query):
+    result=request(url,token,"POST",{"query":query})
+    if result.get("errors") and not result.get("data"): raise RuntimeError(result["errors"][0].get("message","GraphQL error"))
+    return result.get("data") or {}
+
+def state_load():
+    try: return json.loads(STATE.read_text())
+    except Exception: return {}
+
+def state_save(data):
+    STATE.parent.mkdir(parents=True,exist_ok=True); STATE.write_text(json.dumps(data)); os.chmod(STATE,0o600)
+
+def notify(summary,body,url=None):
+    cmd=["notify-send","--app-name=GitHub Tray","--icon=github",summary,body]
+    try:
+        if url:
+            cmd[1:1]=["--action=open=Open"]
+            quoted=" ".join(__import__('shlex').quote(x) for x in cmd)
+            subprocess.Popen(["bash","-c",f'result=$({quoted}); [[ "$result" == open ]] && xdg-open "$1"',"github-tray",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        else: subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    except OSError: pass
+
+def filtered(notifications, a):
+    result=[]
+    for n in notifications:
+        reason=n.get("reason"); typ=n.get("subject",{}).get("type")
+        if reason=="review_requested" and not a.review: continue
+        if reason in ("mention","team_mention") and not a.mentions: continue
+        if reason=="assign" and not a.assignments: continue
+        if typ in ("PullRequest","PullRequestReview","PullRequestReviewComment") and not a.pr_comments: continue
+        if typ in ("Issue","IssueComment") and not a.issue_comments: continue
+        result.append(n)
+    return result
+
+def notification_web(n, web):
+    u=(n.get("subject") or {}).get("url") or (n.get("repository") or {}).get("html_url",web+"/notifications")
+    api,_,_=endpoints(web if web!="https://github.com" else "")
+    u=u.replace(api+"/repos/",web+"/")
+    if (n.get("subject") or {}).get("type","").startswith("PullRequest"): u=u.replace("/pulls/","/pull/").replace("/issues/","/pull/")
+    return u
+
+def enrich_states(gql,token,ns):
+    aliases=[]; lookup={}
+    import re
+    for n in ns:
+        s=n.get("subject") or {}; m=re.search(r"/repos/([^/]+)/([^/]+)/(issues|pulls)/(\d+)$",s.get("url") or "")
+        if not m or s.get("type") not in ("Issue","PullRequest"): continue
+        owner,repo,kind,num=m.groups(); alias="n"+"".join(c for c in str(n["id"]) if c.isdigit()); lookup[alias]=n
+        field="pullRequest" if kind=="pulls" else "issue"; extras=" isDraft" if field=="pullRequest" else ""
+        aliases.append(f'{alias}:repository(owner:{json.dumps(owner)},name:{json.dumps(repo)}){{{field}(number:{num}){{state{extras}}}}}')
+    if not aliases:return
+    try: data=graphql(gql,token,"{"+"\n".join(aliases)+"}")
+    except Exception:return
+    for alias,n in lookup.items():
+        repo=data.get(alias) or {}; item=repo.get("pullRequest") or repo.get("issue")
+        if item:n["_stateInfo"]={"state":item.get("state"),"isDraft":item.get("isDraft",False)}
+
+def menu(a):
+    api,gql,web=endpoints(a.enterprise)
+    query='''{viewer{login avatarUrl followers(first:1){totalCount} repositories(first:100 ownerAffiliations:[OWNER,COLLABORATOR,ORGANIZATION_MEMBER] orderBy:{field:UPDATED_AT,direction:DESC}){totalCount nodes{databaseId name nameWithOwner description url isPrivate isFork owner{login} parent{url} primaryLanguage{name} stargazerCount forkCount updatedAt pushedAt createdAt issues(states:OPEN){totalCount} pullRequests(states:OPEN){totalCount}}} followersList:followers(first:100){nodes{databaseId login url}}}}'''
+    viewer=(graphql(gql,a.token,query).get("viewer") or {})
+    repos=[]
+    for n in (viewer.get("repositories") or {}).get("nodes",[]):
+        ic=(n.get("issues") or {}).get("totalCount",0); pc=(n.get("pullRequests") or {}).get("totalCount",0)
+        repos.append({"id":n.get("databaseId"),"name":n.get("name"),"full_name":n.get("nameWithOwner"),"description":n.get("description"),"html_url":n.get("url"),"private":n.get("isPrivate"),"fork":n.get("isFork"),"owner":n.get("owner"),"parent":{"html_url":n["parent"]["url"]} if n.get("parent") else None,"language":(n.get("primaryLanguage") or {}).get("name"),"stargazers_count":n.get("stargazerCount",0),"forks_count":n.get("forkCount",0),"open_issues_count":ic+pc,"_issuesCount":ic,"_pullsCount":pc,"updated_at":n.get("updatedAt"),"pushed_at":n.get("pushedAt"),"created_at":n.get("createdAt")})
+    key={"stars":lambda r:r["stargazers_count"],"name":lambda r:(r["name"] or "").lower(),"created":lambda r:r["created_at"] or "","pushed":lambda r:r["pushed_at"] or "","updated":lambda r:r["updated_at"] or ""}.get(a.sort_by,lambda r:r["updated_at"] or "")
+    repos.sort(key=key,reverse=a.sort_order!="asc"); repos=repos[:a.max_repos]
+    ns=[]
+    if a.show_notifications:
+        ns=filtered(request(api+"/notifications?per_page=100",a.token),a); enrich_states(gql,a.token,ns)
+    followers=[{"id":n.get("databaseId"),"login":n.get("login"),"html_url":n.get("url")} for n in (viewer.get("followersList") or {}).get("nodes",[])]
+    previous=state_load()
+    if previous and a.desktop:
+        oldrepos={str(r.get("id")):r for r in previous.get("repos",[])}
+        for field,label,suffix in (("stargazers_count","New Stars!","⭐"),("open_issues_count","New Issues Opened","issues"),("forks_count","New Forks Created","forks")):
+            changes=[]
+            for r in repos:
+                old=oldrepos.get(str(r.get("id"))); diff=r.get(field,0)-(old or {}).get(field,r.get(field,0))
+                if diff>0:changes.append(f'{r["name"]} +{diff} {suffix}')
+            if changes:notify(label,"\n".join(changes))
+        old_ids={str(x.get("id")) for x in previous.get("followers",[])}; new=[f for f in followers if str(f.get("id")) not in old_ids]
+        if new:notify("New Followers",new[0]["login"] if len(new)==1 else f"+{len(new)} followers")
+        oldn={str(n.get("id")) for n in previous.get("notifications",[])}; fresh=[n for n in ns if str(n.get("id")) not in oldn]
+        if fresh:notify("GitHub Notifications",f"{len(fresh)} new notification"+("s" if len(fresh)!=1 else ""),notification_web(fresh[0],web) if len(fresh)==1 else web+"/notifications")
+    workflow_state={}
+    try: local_projects=json.loads(a.local_projects or "{}")
+    except Exception: local_projects={}
+    previous_workflows=previous.get("workflows",{})
+    for repo in repos:
+        if repo["full_name"] not in local_projects: continue
+        try: runs=request(f'{api}/repos/{repo["full_name"]}/actions/runs?per_page=5',a.token).get("workflow_runs",[])
+        except Exception: continue
+        workflow_state[repo["full_name"]]=runs
+        old={str(r.get("id")):r for r in previous_workflows.get(repo["full_name"],[])}
+        if previous and a.desktop:
+            for run in runs:
+                before=old.get(str(run.get("id"))); category=f'{repo["name"]} • {run.get("name", "Workflow")}'
+                if not before and run.get("status")=="in_progress" and a.workflow_started: notify("GitHub Actions: Workflow Started",category+"\n"+str(run.get("head_branch") or ""),run.get("html_url"))
+                elif before and before.get("status")!=run.get("status") and run.get("status")=="completed":
+                    conclusion=run.get("conclusion")
+                    if conclusion=="success" and a.workflow_success: notify("GitHub Actions: Workflow Succeeded",category,run.get("html_url"))
+                    elif conclusion=="failure" and a.workflow_failure: notify("GitHub Actions: Workflow Failed",category,run.get("html_url"))
+                    elif conclusion=="cancelled" and a.workflow_cancelled: notify("GitHub Actions: Workflow Cancelled",category,run.get("html_url"))
+    state_save({"repos":repos,"followers":followers,"notifications":ns,"workflows":workflow_state})
+    output({"ok":True,"repos":repos,"notifications":ns,"user":{"login":viewer.get("login") or a.username,"avatar_url":viewer.get("avatarUrl"),"followers":(viewer.get("followers") or {}).get("totalCount",0),"public_repos":(viewer.get("repositories") or {}).get("totalCount",len(repos))},"web":web})
+
+def issues(a):
+    _,gql,_=endpoints(a.enterprise); owner,name=a.repo.split("/",1)
+    q=f'''{{repository(owner:{json.dumps(owner)},name:{json.dumps(name)}){{issues(first:20,states:OPEN,orderBy:{{field:UPDATED_AT,direction:DESC}}){{nodes{{databaseId number title url state updatedAt author{{login}} labels(first:10){{nodes{{name color}}}}}}}} pullRequests(first:20,states:OPEN,orderBy:{{field:UPDATED_AT,direction:DESC}}){{nodes{{databaseId number title url state updatedAt isDraft author{{login}} labels(first:10){{nodes{{name color}}}}}}}}}}}}'''
+    repo=graphql(gql,a.token,q).get("repository") or {}
+    def shape(n):return {"id":n.get("databaseId"),"number":n.get("number"),"title":n.get("title"),"html_url":n.get("url"),"state":(n.get("state") or "OPEN").lower(),"updated_at":n.get("updatedAt"),"user":n.get("author"),"labels":(n.get("labels") or {}).get("nodes",[]),"draft":n.get("isDraft",False)}
+    output({"ok":True,"issues":[shape(x) for x in (repo.get("issues") or {}).get("nodes",[])],"pulls":[shape(x) for x in (repo.get("pullRequests") or {}).get("nodes",[])]})
+
+def workflows(a):
+    api,_,_=endpoints(a.enterprise); runs=request(f"{api}/repos/{a.repo}/actions/runs?per_page={a.limit}",a.token).get("workflow_runs",[])
+    for r in runs:r["repository_full_name"]=a.repo
+    output({"ok":True,"runs":runs})
+
+def main():
+    p=argparse.ArgumentParser(); p.add_argument("command",choices=["menu","issues","workflows","mark-read","rerun"]); p.add_argument("--token",required=True); p.add_argument("--enterprise",default=""); p.add_argument("--username",default=""); p.add_argument("--repo"); p.add_argument("--id"); p.add_argument("--limit",type=int,default=10); p.add_argument("--max-repos",type=int,default=10); p.add_argument("--sort-by",default="updated"); p.add_argument("--sort-order",default="desc"); p.add_argument("--local-projects",default="{}")
+    for flag,dest,default in (("--show-notifications","show_notifications",True),("--desktop","desktop",True),("--review","review",True),("--mentions","mentions",True),("--assignments","assignments",True),("--pr-comments","pr_comments",True),("--issue-comments","issue_comments",True),("--workflow-started","workflow_started",True),("--workflow-success","workflow_success",True),("--workflow-failure","workflow_failure",True),("--workflow-cancelled","workflow_cancelled",True)):p.add_argument(flag,dest=dest,type=lambda x:x=="1",default=default)
+    a=p.parse_args()
+    try:
+        if a.command=="menu":menu(a)
+        elif a.command=="issues":issues(a)
+        elif a.command=="workflows":workflows(a)
+        elif a.command=="mark-read":request(endpoints(a.enterprise)[0]+"/notifications/threads/"+a.id,a.token,"PATCH"); output({"ok":True})
+        elif a.command=="rerun":request(f'{endpoints(a.enterprise)[0]}/repos/{a.repo}/actions/runs/{a.id}/rerun-failed-jobs',a.token,"POST",{}); output({"ok":True})
+    except Exception as e: output({"ok":False,"error":str(e)},1)
+if __name__=="__main__":main()

@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "id": "community.github-tray",
+  "name": "GitHub Tray",
+  "version": "1.1.0",
+  "author": "debba",
+  "license": "MIT",
+  "description": "A faithful Omarchy port of GitHub Tray: repositories, notifications, issues, pull requests and Actions from the bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "GitHub Tray",
+    "description": "GitHub repositories, notifications, issues, pull requests and Actions.",
+    "category": "Development",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "githubUsername": "",
+      "githubToken": "",
+      "githubEnterpriseUrl": "",
+      "panelBox": "right",
+      "fontSize": "small",
+      "maxRepos": 10,
+      "sortBy": "updated",
+      "sortOrder": "desc",
+      "localEditor": "code",
+      "localProjects": "{}",
+      "showNotifications": true,
+      "desktopNotifications": true,
+      "notificationInterval": 60,
+      "notifyReviewRequests": true,
+      "notifyMentions": true,
+      "notifyAssignments": true,
+      "notifyPrComments": true,
+      "notifyIssueComments": true,
+      "workflowRunsMaxDisplay": 10,
+      "notifyWorkflowStarted": true,
+      "notifyWorkflowSuccess": true,
+      "notifyWorkflowFailure": true,
+      "notifyWorkflowCancelled": true,
+      "debugMode": false
+    },
+    "schema": [
+      {
+        "key": "githubUsername",
+        "type": "string",
+        "label": "GitHub username",
+        "defaultValue": ""
+      },
+      {
+        "key": "githubToken",
+        "type": "string",
+        "label": "Personal access token",
+        "defaultValue": "",
+        "description": "Classic token with repo or public_repo scope."
+      },
+      {
+        "key": "githubEnterpriseUrl",
+        "type": "string",
+        "label": "GitHub Enterprise Server URL",
+        "defaultValue": "",
+        "description": "Leave empty for github.com."
+      },
+      {
+        "key": "panelBox",
+        "type": "choice",
+        "label": "Panel position",
+        "options": [
+          {
+            "value": "left",
+            "label": "Left"
+          },
+          {
+            "value": "center",
+            "label": "Center"
+          },
+          {
+            "value": "right",
+            "label": "Right"
+          }
+        ],
+        "defaultValue": "right",
+        "description": "Section of the Omarchy bar where the widget is placed."
+      },
+      {
+        "key": "fontSize",
+        "type": "choice",
+        "label": "Font size",
+        "options": [
+          {
+            "value": "small",
+            "label": "Small"
+          },
+          {
+            "value": "medium",
+            "label": "Medium"
+          },
+          {
+            "value": "large",
+            "label": "Large"
+          }
+        ],
+        "defaultValue": "small"
+      },
+      {
+        "key": "maxRepos",
+        "type": "integer",
+        "label": "Maximum repositories",
+        "min": 1,
+        "max": 50,
+        "step": 1,
+        "defaultValue": 10
+      },
+      {
+        "key": "sortBy",
+        "type": "choice",
+        "label": "Sort repositories by",
+        "options": [
+          {
+            "value": "updated",
+            "label": "Last updated"
+          },
+          {
+            "value": "pushed",
+            "label": "Last pushed"
+          },
+          {
+            "value": "created",
+            "label": "Created date"
+          },
+          {
+            "value": "stars",
+            "label": "Stars"
+          },
+          {
+            "value": "name",
+            "label": "Name"
+          }
+        ],
+        "defaultValue": "updated"
+      },
+      {
+        "key": "sortOrder",
+        "type": "choice",
+        "label": "Sort order",
+        "options": [
+          {
+            "value": "desc",
+            "label": "Descending"
+          },
+          {
+            "value": "asc",
+            "label": "Ascending"
+          }
+        ],
+        "defaultValue": "desc"
+      },
+      {
+        "key": "localEditor",
+        "type": "string",
+        "label": "Local editor command",
+        "defaultValue": "code"
+      },
+      {
+        "key": "localProjects",
+        "type": "string",
+        "label": "Repository path mappings (JSON)",
+        "defaultValue": "{}",
+        "description": "Managed from the widget settings. Example: {\"owner/repo\":\"~/Projects/repo\"}"
+      },
+      {
+        "key": "showNotifications",
+        "type": "boolean",
+        "label": "Show GitHub notifications",
+        "defaultValue": true
+      },
+      {
+        "key": "desktopNotifications",
+        "type": "boolean",
+        "label": "Desktop notifications",
+        "defaultValue": true
+      },
+      {
+        "key": "notificationInterval",
+        "type": "integer",
+        "label": "Notification refresh interval (seconds)",
+        "min": 30,
+        "max": 600,
+        "step": 30,
+        "defaultValue": 60
+      },
+      {
+        "key": "notifyReviewRequests",
+        "type": "boolean",
+        "label": "Review requests",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyMentions",
+        "type": "boolean",
+        "label": "Mentions",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyAssignments",
+        "type": "boolean",
+        "label": "Assignments",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyPrComments",
+        "type": "boolean",
+        "label": "Pull request comments",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyIssueComments",
+        "type": "boolean",
+        "label": "Issue comments",
+        "defaultValue": true
+      },
+      {
+        "key": "workflowRunsMaxDisplay",
+        "type": "integer",
+        "label": "Maximum workflow runs",
+        "min": 1,
+        "max": 50,
+        "step": 1,
+        "defaultValue": 10
+      },
+      {
+        "key": "notifyWorkflowStarted",
+        "type": "boolean",
+        "label": "Notify when workflow starts",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyWorkflowSuccess",
+        "type": "boolean",
+        "label": "Notify when workflow succeeds",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyWorkflowFailure",
+        "type": "boolean",
+        "label": "Notify when workflow fails",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyWorkflowCancelled",
+        "type": "boolean",
+        "label": "Notify when workflow is cancelled",
+        "defaultValue": true
+      },
+      {
+        "key": "debugMode",
+        "type": "boolean",
+        "label": "Debug mode",
+        "defaultValue": false
+      }
+    ]
+  }
+}
