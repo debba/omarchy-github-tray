@@ -5,7 +5,7 @@ Your GitHub account in the Omarchy bar: unread notifications, repositories, issu
 This is a port of my [GitHub Tray GNOME extension](https://github.com/debba/github-tray-gnome-extension) to Omarchy's Quickshell-based bar. Same idea, rebuilt with the shell's own UI kit so it follows your theme, font and corner radius.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="GitHub Tray panel showing the repositories tab" width="420">
+  <img src="preview.png" alt="GitHub Tray panel showing the repositories tab" width="420">
 </p>
 
 ## What it does
@@ -25,6 +25,13 @@ Keyboard: `r` refresh · `s` settings · `o` open on GitHub · `1` / `2` switch 
 ![Demo](docs/demo.gif)
 
 </details>
+
+## Requirements
+
+- Omarchy 4.x with the Quickshell plugin API
+- Python 3 (standard library only; no additional Python packages)
+- A GitHub account and a personal access token
+- `notify-send` and `xdg-open` for desktop notifications and browser actions
 
 ## Install
 
@@ -46,8 +53,16 @@ omarchy-shell community.github-tray settings
 git clone https://github.com/debba/omarchy-github-tray
 cd omarchy-github-tray
 ./install.sh      # symlinks the plugin into ~/.config/omarchy/plugins and enables it
-./uninstall.sh    # removes the symlink and disables it
+./uninstall.sh    # removes only this checkout's symlink and disables it
 ```
+
+The installer refuses to replace an existing installation. To explicitly back it up and replace it with this checkout's symlink:
+
+```bash
+./install.sh --replace
+```
+
+Backups are kept in a hidden `.community.github-tray.backup.*` directory alongside the installed plugins. Re-running the installer for the same development symlink does not create a backup or replace it.
 
 The backend is a single Python script (`scripts/github-tray`) that talks to the GitHub REST and GraphQL APIs with the standard library only, so there is nothing else to install.
 
@@ -77,6 +92,18 @@ omarchy-shell community.github-tray settings
 - Repositories refresh every five minutes; notifications follow the interval you set (60 s by default).
 - The token is stored in Omarchy's `shell.json` together with the other widget settings.
 
+## Uninstall
+
+For an installation made with the plugin manager:
+
+```bash
+omarchy plugin remove community.github-tray
+```
+
+For a local development symlink, run `./uninstall.sh` from the original checkout. It refuses to remove another checkout's symlink or a plugin-manager installation.
+
+Removal leaves `~/.local/state/omarchy-github-tray/state.json` intact. The token is stored in Omarchy's `shell.json`, not the cache; remove it from the widget settings before uninstalling if you no longer need it.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
